@@ -1,100 +1,57 @@
-Run the following db script
+1. To Run Confluence Kafka in Terminal (Linux Windows Subsystem Terminal)
+confluent local services start
 
-CREATE DATABASE [Workforce]
-GO
-USE [Workforce]
-GO
-/****** Object:  Table [dbo].[Employee]    Script Date: 2023-01-29 6:24:51 PM ******/
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
-CREATE TABLE [dbo].[Employee](
-	[EmployeeId] [int] IDENTITY(1,1) NOT NULL,
-	[EmployeeName] [nvarchar](200) NOT NULL,
-	[HourlyRate] [decimal](18, 0) NULL,
-	[HoursWorked] [int] NULL,
- CONSTRAINT [PK_Employee] PRIMARY KEY CLUSTERED 
-(
-	[EmployeeId] ASC
-)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
-) ON [PRIMARY]
-GO
-/****** Object:  StoredProcedure [dbo].[GetEmployees]    Script Date: 2023-01-29 6:24:51 PM ******/
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
-CREATE PROCEDURE [dbo].[GetEmployees]
-(
-	@PageNumber AS INT = 1,
-	@PageSize AS INT = 10
-)
-AS
-BEGIN
-	IF @PageNumber = 0 AND @PageSize = 0
-	BEGIN
-		SET @PageNumber = 1
-		SET @PageSize = 10
-	END
+2. Run the DB Script (For Table and SPs)
 
-	;WITH CTX AS
-	(
-		SELECT ROW_NUMBER() OVER (ORDER BY [EMP].[EmployeeId] ASC) AS [ROW]
-			,[EMP].[EmployeeId]
-			,[EMP].[EmployeeName]
-			,[EMP].[HourlyRate]
-			,[EMP].[HoursWorked]
-		FROM [DBO].[Employee] AS [EMP]
-	),TempCount AS
-	(
-		SELECT ((COUNT(*) - 1) / @PageSize) + 1 AS TotalPages, COUNT(*) AS TotalRecords
-		FROM CTX
-	)
-	SELECT * FROM
-	(
-		SELECT D.*, TotalPages, TotalRecords FROM CTX d, TempCount
-	)RES WHERE RES.[ROW] BETWEEN (@PageNumber-1) * @PageSize + 1
-	AND @PageNumber * @PageSize
-END
-GO
-/****** Object:  StoredProcedure [dbo].[SaveEmployee]    Script Date: 2023-01-29 6:24:51 PM ******/
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
-CREATE PROCEDURE [dbo].[SaveEmployee]
-(
-	@EmployeeID INT,
-	@EmployeeName NVARCHAR(200),
-	@HourlyRate DECIMAL(18,0) NULL,
-	@HoursWorked INT NULL
-)
-AS
-BEGIN
-	IF NOT EXISTS(SELECT TOP 1 * FROM [dbo].[Employee]
-	WHERE EmployeeID = @EmployeeID)
-	BEGIN
-		INSERT INTO [dbo].[Employee]
-		(
-			EmployeeName,
-			HourlyRate,
-			HoursWorked
-		)
-		VALUES
-		(
-			@EmployeeName,
-			@HourlyRate,
-			@HoursWorked
-		)
-	END
-	ELSE
-	BEGIN
-		UPDATE [dbo].[Employee]
-		SET EmployeeName = @EmployeeName,
-			HourlyRate = @HourlyRate,
-			HoursWorked = @HoursWorked
-		WHERE EmployeeId = @EmployeeID
-	END
-END
-GO
+3. Create a topic called "testtopic" in Confluence Kafka Control Admin Page
+
+Note: If different topic name is needed goto appsettings.json of EmployeeProducerService
+and change the line   
+"EmployeeServiceTopicName": "testtopic"
+
+If topic generation needs to be configured modify
+"TopicGenerationTimeIntervalInMinutes" :  1
+
+Default Port being used for Confluence Kakfa is 9092. In order to change it modify
+"ConfluenceKafkaServiceBusUrl": "localhost:9092"
+
+Do the same change in EmployeeConsumerService
+"ConfluenceKafkaServiceBusUrl": "localhost:9092",
+"EmployeeServiceTopicName": "testtopic",
+"EmployeeServiceTopicGroupId": "testtopic-group",
+"TopicGenerationTimeIntervalInMinutes": 1,
+
+4. Change the Sql Server connectionString if needed in EmployeeConsumerService appsettings
+and EmployeeServiceApi
+"SqlConnectionString": "Data Source=.;Initial Catalog=Workforce;Integrated Security=True;TrustServerCertificate=True;"
+
+5. First Run EmployeeProductionService. This will generate employee data and post it
+to Confluence Kafka topic
+
+Secondly Run EmployeeConsumerService. This will subscribe to the topic and send it to
+business layer and broadcast SignalR messages
+
+Thirddly Run EmployeeConsumerSignalRRecieverClient to listen to SignalR messages broadcasted by EmployeeConsumerService 
+
+To stop receiving SignalR messages modify appsettings.json in EmployeeConsumerSignalRRecieverClient
+"ListenToSignalRBroadCasting": true
+
+Fourthly Run EmployeeServiceApi to get the list of employees paginated
+
+Api will return totalPages and totalRecords 
+
+https://localhost:7135/api/employee/getEmployees/1/10
+
+In the example given below, api result tells us that there are 7 pages and 63 totalRecords
+
+Some pagination Plugins need totalRecords inorder to generate the Pagination UI
+
+{"result":{"totalPages":7,"pageData":[{"employeeId":1,"employeeName":"Employee 1","hourlyRate":76,"hoursWorked":76},{"employeeId":2,"employeeName":"Employee 2","hourlyRate":35,"hoursWorked":35},{"employeeId":3,"employeeName":"Employee 3","hourlyRate":62,"hoursWorked":62},{"employeeId":4,"employeeName":"Employee 4","hourlyRate":58,"hoursWorked":58},{"employeeId":5,"employeeName":"Employee 5","hourlyRate":29,"hoursWorked":29},{"employeeId":6,"employeeName":"Employee 6","hourlyRate":47,"hoursWorked":47},{"employeeId":7,"employeeName":"Employee 7","hourlyRate":33,"hoursWorked":33},{"employeeId":8,"employeeName":"Employee 8","hourlyRate":80,"hoursWorked":80},{"employeeId":9,"employeeName":"Employee 9","hourlyRate":57,"hoursWorked":57},{"employeeId":10,"employeeName":"Employee 10","hourlyRate":73,"hoursWorked":73}],"totalRecords":63},"statusCode":200}
+
+Note : There is still some issue in SignalR which is under investigation.
+
+Everything is working as expected SignalR although code seems to be correct
+
+
+
+
